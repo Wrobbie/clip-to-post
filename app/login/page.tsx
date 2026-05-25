@@ -17,7 +17,7 @@ export default function LoginPage() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
-  const handleSignIn = async (e: React.FormEvent) => {
+  const handleSignIn = async (e: React.SyntheticEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setMessage("");
@@ -36,7 +36,7 @@ export default function LoginPage() {
     }
   };
 
-  const handleSignUp = async (e: React.FormEvent) => {
+  const handleSignUp = async (e: React.SyntheticEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setMessage("");
