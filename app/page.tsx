@@ -103,11 +103,9 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-slate-900 text-slate-100 p-8 flex flex-col items-center justify-start space-y-12">
       <div className="max-w-3xl w-full space-y-8 bg-slate-800 p-8 rounded-xl shadow-2xl border border-slate-700">
-        <div className="text-center">
-          <h1 className="text-3xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-400">
-            ClipToPost 🎬
-          </h1>
-          <p className="mt-2 text-sm text-slate-400">
+        <div>
+          <h2 className="text-xl font-bold text-slate-100">Create New Post</h2>
+          <p className="mt-1 text-sm text-slate-400">
             Drop a YouTube link below to turn it into a high-engaging LinkedIn post.
           </p>
         </div>
