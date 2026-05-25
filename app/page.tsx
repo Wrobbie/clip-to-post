@@ -80,6 +80,26 @@ export default function Home() {
     }
   };
 
+  // Function to delete a post from Supabase and update local UI state
+  const handleDelete = async (id: string) => {
+    if(!confirm("Are you sure you want to delete this post? This action cannot be undone.")) return;
+    
+    try {
+      const { error } = await supabase
+        .from("generations")
+        .delete()
+        .eq("id", id);
+
+        if (error) {
+          alert(`Failed to delete: ${error.message}`);
+        } else {
+          setHistory((prevHistory) => prevHistory.filter((item) => item.id !== id));
+        }
+      } catch(err) {
+          console.error("Error deleting post:", err);
+        }
+    };
+
   return (
     <main className="min-h-screen bg-slate-900 text-slate-100 p-8 flex flex-col items-center justify-start space-y-12">
       <div className="max-w-3xl w-full space-y-8 bg-slate-800 p-8 rounded-xl shadow-2xl border border-slate-700">
@@ -157,7 +177,17 @@ export default function Home() {
                     <span>
                       📅 {new Date(post.created_at).toLocaleDateString()}
                     </span>
-                    <CopyButton text={post.linkedin_post} /> {/* <-- Added Copy Button here too! */}
+                    <CopyButton text={post.linkedin_post} />
+
+                    <button
+                        onClick={() => handleDelete(post.id)}
+                        className="p-1.5 rounded-md bg-slate-900 border border-slate-700 text-slate-400 hover:text-rose-400 hover:border-rose-900/50 hover:bg-rose-950/20 transition duration-200"
+                        title="Delete generation"
+                      >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                      </button>
                   </div>
                 </div>
                 <div className="bg-slate-950/50 p-4 rounded-lg text-slate-300 text-xs whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto border border-slate-900">
