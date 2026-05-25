@@ -1,6 +1,9 @@
 import { GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
 import { YoutubeTranscript } from "youtube-transcript";
+import { createRouteClient } from "@/utils/supabase"; // Import helper
+
+export const dynamic = "force-dynamic";
 
 // Initialize Gemini with API key
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -26,7 +29,6 @@ export async function POST(request: Request) {
     }
 
     // 1. Fetch transcript from YouTube
-    // This returns an array of objects: [{ text: "hello", start: 0, duration: 2 }, ...]
     const transcriptObj = await YoutubeTranscript.fetchTranscript(videoId);
     
     // 2. Combine the array of text snippets into one giant paragraph
@@ -48,7 +50,42 @@ export async function POST(request: Request) {
       }
     });
 
-    return NextResponse.json({ success: true, data: response.text });
+    const generatedPost = response.text;
+
+    // ==========================================
+    // 🔥 NEW: SAVE THE DATA TO SUPABASE HERE! 🔥
+    // ==========================================
+    try {
+      const supabase = await createRouteClient();
+
+      // Get the real logged-in user session
+      const { data: { user } } = await supabase.auth.getUser();
+
+      // If there is no user logged in, explicitly block the generation!
+      if (!user) {
+        return NextResponse.json({ success: false, error: "Authentication required. Please log in first." }, { status: 401 });
+      }
+
+      const { error: dbError } = await supabase
+        .from("generations")
+        .insert({
+          user_id: user.id, // Using the real user ID now!
+          video_url: videoUrl,
+          linkedin_post: generatedPost
+        });
+
+      if (dbError) {
+        console.error("Database Save Error:", dbError.message);
+        return NextResponse.json({ success: false, error: `Database Error: ${dbError.message}` });
+      }
+    } catch (dbCatchError: any) {
+      console.error("Failed to call Supabase:", dbCatchError);
+      return NextResponse.json({ success: false, error: `Supabase System Error: ${dbCatchError.message}` });
+    }
+    // ==========================================
+
+    // If everything succeeds (Gemini + Database save), send it back to page.tsx
+    return NextResponse.json({ success: true, data: generatedPost });
 
   } catch (error: any) {
     console.error("API Error:", error);
