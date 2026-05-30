@@ -2,6 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
 import { YoutubeTranscript } from "youtube-transcript";
 import { createRouteClient } from "@/utils/supabase";
+import { createClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +16,7 @@ function getYouTubeId(url: string) {
   return (match && match[2].length === 11) ? match[2] : null;
 }
 
-// 🔥 NEW: Lightweight helper to fetch video title via official oEmbed API
+// Lightweight helper to fetch video title via official oEmbed API
 async function getYouTubeTitle(videoUrl: string): Promise<string> {
   try {
     const response = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(videoUrl)}&format=json`);
@@ -30,7 +31,58 @@ async function getYouTubeTitle(videoUrl: string): Promise<string> {
 
 export async function POST(request: Request) {
   try {
-    // 1. Extract the new options alongside the video URL
+    // 1. Authenticate user at the very beginning to enforce limits early
+    const supabaseUserClient = await createRouteClient();
+    const { data: { user } } = await supabaseUserClient.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json(
+        { success: false, error: "Authentication required. Please log in first." }, 
+        { status: 401 }
+      );
+    }
+
+    // 2. Initialize an Admin client with a strict fallback check
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      console.warn("⚠️ WARNING: SUPABASE_SERVICE_ROLE_KEY is not detected in your environment variables. Falling back to Anon Key.");
+    }
+
+    const supabaseAdmin = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      serviceKey!
+    );
+    console.log("Checking profile with Admin privileges for User ID:", user.id);
+
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from("profiles")
+      .select("credits_used, is_pro")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (profileError) {
+      console.error("Supabase Profile Read Error:", profileError.message);
+      return NextResponse.json({ success: false, error: `Database read failure: ${profileError.message}` }, { status: 500 });
+    }
+
+    if (!profile) {
+      console.error(`CRITICAL: Profile row missing entirely for User ID: ${user.id}`);
+      return NextResponse.json({ success: false, error: "Profile missing. Please verify your profiles table setup." }, { status: 500 });
+    }
+
+    // Check if limit of 3 runs has already been met or exceeded
+    if (!profile.is_pro && profile.credits_used >= 3) {
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: "Usage limit reached! You have used your 3 free credits. Please upgrade your tier to unlock unlimited outputs." 
+        }, 
+        { status: 403 }
+      );
+    }
+
+    // 3. Extract parameters from payload body
     const { videoUrl, platform, style } = await request.json();
 
     if (!videoUrl) {
@@ -42,17 +94,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid YouTube URL format" }, { status: 400 });
     }
 
-    // 🔥 NEW: Simultaneously grab video details and transcript snippets
+    // Simultaneously grab video details and transcript snippets
     const [videoTitle, transcriptObj] = await Promise.all([
       getYouTubeTitle(videoUrl),
       YoutubeTranscript.fetchTranscript(videoId)
     ]);
 
-    // Construct the static open-source thumbnail preview URL
+    // Construct static thumbnail preview URL and stringify text content
     const videoThumbnail = `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`;
     const fullTranscript = transcriptObj.map((item) => item.text).join(" ");
 
-    // 3. Build Dynamic Formatting Instructions based on Platform Selection
+    // 4. Build Dynamic Formatting Instructions based on Platform Selection
     let platformInstructions = "";
     switch (platform) {
       case "twitter":
@@ -83,7 +135,7 @@ export async function POST(request: Request) {
         break;
     }
 
-    // 4. Build Dynamic Voice Instructions based on Style Selection
+    // 5. Build Dynamic Voice Instructions based on Style Selection
     let styleInstructions = "";
     switch (style) {
       case "storyteller":
@@ -110,7 +162,7 @@ export async function POST(request: Request) {
         break;
     }
 
-    // Combine them into a master system instruction directive
+    // Combine into master system instruction directive
     const systemInstruction = `
       You are an elite, world-class content copywriter specializing in digital content distribution.
       Your task is to take a raw YouTube video transcript and repurpose it flawlessly based on the rules below.
@@ -122,7 +174,7 @@ export async function POST(request: Request) {
       ${styleInstructions}
     `;
 
-    // 5. Ask Gemini to generate the content using the dynamic configuration
+    // 6. Ask Gemini to generate content
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash", 
       contents: `Here is the video transcript to repurpose: ${fullTranscript}`,
@@ -134,46 +186,37 @@ export async function POST(request: Request) {
 
     const generatedPost = response.text;
 
-    // 6. Save the generation to Supabase with the new columns included
-    try {
-      const supabase = await createRouteClient();
+    // 7. Save generation output parameters to Supabase
+    const { error: dbError } = await supabaseUserClient
+      .from("generations")
+      .insert({
+        user_id: user.id,
+        video_url: videoUrl,
+        linkedin_post: generatedPost,
+        platform: platform || "linkedin",
+        style: style || "professional",
+        video_title: videoTitle,
+        video_thumbnail: videoThumbnail,
+      });
 
-      // Get the real logged-in user session
-      const { data: { user } } = await supabase.auth.getUser();
-
-      // If there is no user logged in, explicitly block the generation!
-      if (!user) {
-        return NextResponse.json({ success: false, error: "Authentication required. Please log in first." }, { status: 401 });
-      }
-
-      const { error: dbError } = await supabase
-        .from("generations")
-        .insert({
-          user_id: user.id,
-          video_url: videoUrl,
-          linkedin_post: generatedPost,
-          platform: platform || "linkedin",
-          style: style || "professional",
-          video_title: videoTitle,          // 🔥 NEW: Saves real pulled video title
-          video_thumbnail: videoThumbnail,  // 🔥 NEW: Saves working public thumbnail link
-        });
-
-      if (dbError) {
-        console.error("Database Save Error:", dbError.message);
-        return NextResponse.json({ success: false, error: `Database Error: ${dbError.message}` });
-      }
-    } catch (dbCatchError: any) {
-      console.error("Failed to call Supabase:", dbCatchError);
-      return NextResponse.json({ success: false, error: `Supabase System Error: ${dbCatchError.message}` });
+    if (dbError) {
+      console.error("Database Save Error:", dbError.message);
+      return NextResponse.json({ success: false, error: `Database Error: ${dbError.message}` });
     }
 
-    // Return the final text block on success
+    // Increment usage counter tracking using admin bypass client
+    await supabaseAdmin
+      .from("profiles")
+      .update({ credits_used: profile.credits_used + 1 })
+      .eq("id", user.id);
+
+    // Return final text block on success
     return NextResponse.json({ success: true, data: generatedPost });
 
   } catch (error: any) {
     console.error("API Error:", error);
     return NextResponse.json(
-      { error: error.message || "Failed to fetch YouTube transcript. Make sure the video has captions enabled." }, 
+      { error: error.message || "Failed to process transaction logic properly." }, 
       { status: 500 }
     );
   }

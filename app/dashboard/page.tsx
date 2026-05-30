@@ -22,6 +22,10 @@ export default function Home() {
   const [result, setResult] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [history, setHistory] = useState<Generation[]>([]);
+  
+  // Track the permanent paywall lock state matching the backend profile row
+  const [isLocked, setIsLocked] = useState(false);
+  const [forceLock, setForceLock] = useState(false);
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -40,6 +44,20 @@ export default function Home() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
+      // 1. Check permanent user parameters from the profiles table
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("credits_used, is_pro")
+        .eq("id", user.id)
+        .single();
+
+      if (profile && !profile.is_pro && profile.credits_used >= 3) {
+        setIsLocked(true);
+      } else {
+        setIsLocked(false);
+      }
+
+      // 2. Fetch history list cards for the feed block below
       const { data, error } = await supabase
         .from("generations")
         .select("id, video_url, linkedin_post, platform, style, created_at, video_title, video_thumbnail")
@@ -63,7 +81,7 @@ export default function Home() {
 
   const handleSubmit = async (e: React.SyntheticEvent) => {
     e.preventDefault();
-    if (!videoUrl.trim()) return;
+    if (!videoUrl.trim() || isLocked) return;
 
     setIsLoading(true);
     setResult("");
@@ -76,6 +94,14 @@ export default function Home() {
       });
 
       const data = await response.json();
+
+      if (response.status === 403 || !data.success) {
+        setResult("");
+        setIsLocked(true);
+        setForceLock(true);
+        await fetchHistory();
+        return;
+      }
 
       if (data.success) {
         setResult(data.data);
@@ -96,15 +122,14 @@ export default function Home() {
         setHistory((prevHistory) => [newGeneration, ...prevHistory]);
         setVideoUrl("");
         
-        // Refresh full history log to fetch backend scraped metadata
-        fetchHistory();
-      } else {
-        setResult(`Error: ${data.error || "Something went wrong"}`);
+        // 🔥 FORCE the code to wait here too
+        await fetchHistory();
       }
     } catch (error) {
       console.error(error);
       setResult("Failed to connect to the server.");
     } finally {
+      // This will now execute safely AFTER isLocked has been set in stone by fetchHistory
       setIsLoading(false);
     }
   };
@@ -136,8 +161,33 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-slate-900 text-slate-100 p-8 flex flex-col items-center justify-start space-y-12">
-      {/* Main Generator Box */}
-      <div className="max-w-3xl w-full space-y-8 bg-slate-800 p-8 rounded-xl shadow-2xl border border-slate-700">
+      
+      {/* Main Generator Box Container */}
+      <div className="max-w-3xl w-full space-y-8 bg-slate-800 p-8 rounded-xl shadow-2xl border border-slate-700 relative overflow-hidden">
+        
+        {/* Paywall Blur Overlay Layer */}
+        {(isLocked || forceLock) && (
+          <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm z-10 flex flex-col items-center justify-center p-6 text-center animate-fadeIn">
+            <div className="max-w-md bg-slate-900 border border-slate-700 p-8 rounded-xl shadow-2xl space-y-4">
+              <div className="w-12 h-12 rounded-full bg-amber-500/10 text-amber-400 flex items-center justify-center text-xl mx-auto">
+                ⚡
+              </div>
+              <h3 className="text-xl font-bold text-slate-100">Free Tier Limit Reached</h3>
+              <p className="text-sm text-slate-400 leading-relaxed">
+                You have used your <span className="text-slate-200 font-semibold">3 free credits</span>. Upgrade to our Pro plan to unlock unlimited multi-platform digital distribution generation passes.
+              </p>
+              <div className="pt-2">
+                <button 
+                  onClick={() => alert("Stripe payment portal hookup goes here next!")}
+                  className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold py-3 px-5 rounded-lg transition duration-200 shadow-lg shadow-blue-500/20"
+                >
+                  Upgrade to Pro ($9/mo)
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div>
           <h2 className="text-xl font-bold text-slate-100">Repurpose Content Engine</h2>
           <p className="mt-1 text-sm text-slate-400">
@@ -160,12 +210,13 @@ export default function Home() {
                 <button
                   key={opt.id}
                   type="button"
+                  disabled={isLocked}
                   onClick={() => setPlatform(opt.id)}
                   className={`p-3 rounded-lg border text-left flex flex-col transition duration-150 ${
                     platform === opt.id
                       ? "bg-blue-600/20 border-blue-500 text-blue-200 shadow-md shadow-blue-500/5"
                       : "bg-slate-950/40 border-slate-700 text-slate-400 hover:border-slate-600"
-                  }`}
+                  } disabled:opacity-40`}
                 >
                   <span className="text-sm font-semibold">{opt.label}</span>
                   <span className="text-[10px] mt-0.5 opacity-80">{opt.desc}</span>
@@ -181,8 +232,9 @@ export default function Home() {
             </label>
             <select
               value={style}
+              disabled={isLocked}
               onChange={(e) => setStyle(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer"
+              className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer disabled:opacity-40"
             >
               <option value="professional">Professional Analyst (Data-focused, clean breakdowns)</option>
               <option value="storyteller">The Storyteller (Hooks reader via high tension stories)</option>
@@ -197,18 +249,18 @@ export default function Home() {
             </label>
             <input
               type="url"
-              className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-40"
               placeholder="https://www.youtube.com/watch?v=..."
               value={videoUrl}
               onChange={(e) => setVideoUrl(e.target.value)}
-              disabled={isLoading}
+              disabled={isLoading || isLocked}
               required
             />
           </div>
 
           <button
             type="submit"
-            disabled={isLoading}
+            disabled={isLoading || isLocked}
             className="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-3 px-4 rounded-lg transition duration-200 shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isLoading ? "Analyzing Transcript & Re-Writing Style..." : "Generate Content"}
@@ -250,7 +302,7 @@ export default function Home() {
               >
                 {/* 1. LEFT COLUMN: Thumbnail Preview */}
                 {post.video_thumbnail && (
-                  <div className="relative w-full md:w-44 h-24 rounded-lg overflow-hidden bg-slate-950 border border-slate-700 flex-shrink-0 group shadow-inner">
+                  <div className="relative w-full md:w-44 h-24 rounded-lg overflow-hidden bg-slate-950 border border-slate-700 shrink-0 group shadow-inner">
                     <img 
                       src={post.video_thumbnail} 
                       alt="YouTube preview" 
@@ -269,13 +321,13 @@ export default function Home() {
                 )}
 
                 {/* 2. RIGHT/CENTER MAIN CONTENT AREA */}
-                <div className="flex-grow flex flex-col space-y-3 min-w-0 w-full">
+                <div className="grow flex flex-col space-y-3 min-w-0 w-full">
                   
                   {/* HEADER SECTION: Title + Badges on Left, Actions tucked neatly on Right */}
                   <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 w-full">
                     
                     {/* Title & Badge Layout Cluster */}
-                    <div className="space-y-1.5 min-w-0 flex-grow">
+                    <div className="space-y-1.5 min-w-0 grow">
                       <h3 className="font-bold text-slate-200 text-base tracking-tight leading-snug truncate pr-2">
                         {post.video_title || "Processed YouTube Clip"}
                       </h3>
@@ -293,8 +345,8 @@ export default function Home() {
                       </div>
                     </div>
 
-                    {/* Action Button Row - Placed inline with title context, keeping fixed sizing */}
-                    <div className="flex items-center gap-2 flex-shrink-0 self-end sm:self-start">
+                    {/* Action Button Row */}
+                    <div className="flex items-center gap-2 shrink-0 self-end sm:self-start">
                       <div className="flex items-center justify-center h-9">
                         <CopyButton text={post.linkedin_post} />
                       </div>
@@ -313,7 +365,7 @@ export default function Home() {
 
                   </div>
 
-                  {/* 3. TEXT OUTPUT BOX: Spans full remaining width underneath header details */}
+                  {/* 3. TEXT OUTPUT BOX */}
                   <div className="bg-slate-950/50 p-3.5 rounded-lg text-slate-300 text-xs whitespace-pre-wrap leading-relaxed max-h-32 overflow-y-auto border border-slate-900 custom-scrollbar w-full">
                     {post.linkedin_post}
                   </div>
