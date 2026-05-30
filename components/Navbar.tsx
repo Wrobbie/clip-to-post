@@ -21,6 +21,19 @@ export default function Navbar() {
       }
     };
     getUserData();
+
+    // Listen for auth state change to update email on sign in/sign out
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_OUT" || !session) {
+        setEmail(null); // Clear email on sign out
+      } else if (session?.user?.email) {
+        setEmail(session.user.email);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, [supabase]);
 
   const handleSignOut = async () => {
@@ -30,7 +43,7 @@ export default function Navbar() {
         console.error("Error signing out:", error.message);
       } else {
         router.refresh();
-        router.push("/login");
+        router.push("/");
       }
     } catch (err) {
       console.error("Signout unexpected error:", err);
@@ -39,7 +52,7 @@ export default function Navbar() {
 
   return (
     <nav className="w-full bg-slate-850 border-b border-slate-800 px-6 py-4 flex items-center justify-between shadow-md">
-      <div className="flex items-center space-x-2 cursor-pointer" onClick={() => router.push("/")}>
+      <div className="flex items-center space-x-2 cursor-pointer" onClick={() => router.push("/dashboard")}>
         <span className="text-xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-400">
           ClipToPost 🎬
         </span>

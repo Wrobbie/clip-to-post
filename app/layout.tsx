@@ -1,27 +1,28 @@
-import type { Metadata } from "next";
-import { Inter } from "next/font/google";
-import Navbar from "@/components/Navbar"; // 🔥 Import the new navbar component
-import "./globals.css";
+"use client"; // Ensure this is at the top if you are using client side hooks here
 
-const inter = Inter({ subsets: ["latin"] });
-
-export const metadata: Metadata = {
-  title: "ClipToPost",
-  description: "Turn your YouTube video links into highly engaging LinkedIn posts.",
-};
+import { usePathname } from "next/navigation";
+import Navbar from "@/components/Navbar";
+import "./globals.css"; // Or whatever your global CSS import is
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
+  const pathname = usePathname();
+
+  // Define which routes should NOT show the global top navbar
+  // We hide it on the landing page ("/") and the login page ("/login")
+  const hideNavbarRoutes = ["/", "/login"];
+  const shouldShowNavbar = !hideNavbarRoutes.includes(pathname);
+
   return (
     <html lang="en">
-      <body className={`${inter.className} bg-slate-900 text-slate-100 min-h-screen flex flex-col`}>
-        <Navbar />
-        <div className="grow">
-          {children}
-        </div>
+      <body className="bg-slate-950 text-slate-100 antialiased">
+        {/* Only show the global navbar if we aren't on a public landing page */}
+        {shouldShowNavbar && <Navbar />}
+        
+        <main>{children}</main>
       </body>
     </html>
   );

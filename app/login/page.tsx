@@ -31,7 +31,7 @@ export default function LoginPage() {
       setMessage(`Error: ${error.message}`);
       setIsLoading(false);
     } else {
-      router.push("/");
+      router.push("/dashboard");
       router.refresh();
     }
   };

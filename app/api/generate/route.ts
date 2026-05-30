@@ -15,6 +15,19 @@ function getYouTubeId(url: string) {
   return (match && match[2].length === 11) ? match[2] : null;
 }
 
+// 🔥 NEW: Lightweight helper to fetch video title via official oEmbed API
+async function getYouTubeTitle(videoUrl: string): Promise<string> {
+  try {
+    const response = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(videoUrl)}&format=json`);
+    if (!response.ok) return "Untitled YouTube Video";
+    const data = await response.json();
+    return data.title || "Untitled YouTube Video";
+  } catch (error) {
+    console.error("Failed to fetch video title:", error);
+    return "Untitled YouTube Video";
+  }
+}
+
 export async function POST(request: Request) {
   try {
     // 1. Extract the new options alongside the video URL
@@ -29,8 +42,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid YouTube URL format" }, { status: 400 });
     }
 
-    // 2. Fetch the real transcript from YouTube
-    const transcriptObj = await YoutubeTranscript.fetchTranscript(videoId);
+    // 🔥 NEW: Simultaneously grab video details and transcript snippets
+    const [videoTitle, transcriptObj] = await Promise.all([
+      getYouTubeTitle(videoUrl),
+      YoutubeTranscript.fetchTranscript(videoId)
+    ]);
+
+    // Construct the static open-source thumbnail preview URL
+    const videoThumbnail = `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`;
     const fullTranscript = transcriptObj.map((item) => item.text).join(" ");
 
     // 3. Build Dynamic Formatting Instructions based on Platform Selection
@@ -132,9 +151,11 @@ export async function POST(request: Request) {
         .insert({
           user_id: user.id,
           video_url: videoUrl,
-          linkedin_post: generatedPost, // Keeping original column name for the post content
-          platform: platform || "linkedin", // Logs selected platform
-          style: style || "professional"    // Logs selected tone persona
+          linkedin_post: generatedPost,
+          platform: platform || "linkedin",
+          style: style || "professional",
+          video_title: videoTitle,          // 🔥 NEW: Saves real pulled video title
+          video_thumbnail: videoThumbnail,  // 🔥 NEW: Saves working public thumbnail link
         });
 
       if (dbError) {
